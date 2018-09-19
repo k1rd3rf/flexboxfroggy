@@ -1,7 +1,7 @@
-var firebase = new Firebase('https://blinding-heat-5896.firebaseio.com/web/data');
-var analytics = firebase.child('analytics');
 var game = {
+  colorblind: (localStorage.colorblind && JSON.parse(localStorage.colorblind)) || 'false',
   language: window.location.hash.substring(1) || 'en',
+  difficulty: 'easy',
   level: parseInt(localStorage.level, 10) || 0,
   answers: (localStorage.answers && JSON.parse(localStorage.answers)) || {},
   solved: (localStorage.solved && JSON.parse(localStorage.solved)) || [],
@@ -9,11 +9,20 @@ var game = {
   changed: false,
 
   start: function() {
-    game.translate();
+    // navigator.language can include '-'
+    // ref: https://developer.mozilla.org/en-US/docs/Web/API/NavigatorLanguage/language
+    var requestLang = window.navigator.language.split('-')[0];
+    if (window.location.hash === '' && requestLang !== 'en' && messages.languageActive.hasOwnProperty(requestLang)) {
+      game.language = requestLang;
+      window.location.hash = requestLang;
+    }
 
+    game.translate();
     $('#level-counter .total').text(levels.length);
     $('#editor').show();
     $('#share').hide();
+    $('#language').val(game.language);
+    $('input[value="' + game.colorblind + '"]', '#colorblind').prop('checked', true);
 
     if (!localStorage.user) {
       game.user = '' + (new Date()).getTime() + Math.random().toString(36).slice(1);
@@ -98,11 +107,54 @@ var game = {
       }
     });
 
+    $('#labelSettings').on('click', function() {
+      $('#levelsWrapper').hide();
+      $('#settings .tooltip').toggle();
+    })
+
+    $('#language').on('change', function() {
+      window.location.hash = $(this).val();
+    });
+
+    $('#difficulty').on('change', function() {
+      game.difficulty = $('input:checked', '#difficulty').val();
+
+      // setting height will prevent a slight jump when the animation starts
+      var $instructions = $('#instructions');
+      var height = $instructions.height();
+      $instructions.css('height', height);
+      
+      if (game.difficulty == 'hard' || game.difficulty == 'medium') {
+        $instructions.slideUp();
+      } else {
+        $instructions.css('height', '').slideDown();
+      }
+    });
+
+    $('#colorblind').on('change', function() {
+      game.colorblind = $('input:checked', '#colorblind').val();
+
+      if (game.colorblind == 'true') {
+        $('.lilypad, .frog').addClass('cb-friendly');
+      } else {
+        $('.lilypad, .frog').removeClass('cb-friendly');
+      }
+    });
+
+    $('body').on('click', function() {
+      $('.tooltip').hide();
+    });
+
+    $('.tooltip, .toggle, #level-indicator').on('click', function(e) {
+      e.stopPropagation();
+    });
+
     $(window).on('beforeunload', function() {
       game.saveAnswer();
       localStorage.setItem('level', game.level);
       localStorage.setItem('answers', JSON.stringify(game.answers));
       localStorage.setItem('solved', JSON.stringify(game.solved));
+      localStorage.setItem('colorblind', JSON.stringify(game.colorblind));
     }).on('hashchange', function() {
       game.language = window.location.hash.substring(1) || 'en';
       game.translate();
@@ -127,7 +179,11 @@ var game = {
   },
 
   next: function() {
-    this.level++;
+    if (this.difficulty === "hard") {
+      this.level = Math.floor(Math.random()* levels.length)
+    } else {
+      this.level++
+    }
 
     var levelData = levels[this.level];
     this.loadLevel(levelData);
@@ -153,6 +209,7 @@ var game = {
     });
 
     $('#level-indicator').on('click', function() {
+      $('#settings .tooltip').hide();
       $('#levelsWrapper').toggle();
     });
 
@@ -219,8 +276,8 @@ var game = {
       var c = string.charAt(i);
       var color = colors[c];
 
-      var lilypad = $('<div/>').addClass('lilypad ' + color).data('color', color);
-      var frog = $('<div/>').addClass('frog ' + color).data('color', color);
+      var lilypad = $('<div/>').addClass('lilypad ' + color + (this.colorblind == 'true' ? ' cb-friendly' : '')).data('color', color);
+      var frog = $('<div/>').addClass('frog ' + color + (this.colorblind == 'true' ? ' cb-friendly' : '')).data('color', color);
 
       $('<div/>').addClass('bg').css(game.transform()).appendTo(lilypad);
       $('<div/>').addClass('bg animated pulse infinite').appendTo(frog);
@@ -273,8 +330,8 @@ var game = {
     $('#pond ' +  selector).attr('style', code);
     game.saveAnswer();
   },
-  
-  check: function() {    
+
+  check: function() {
     game.applyStyles();
 
     var level = levels[game.level];
@@ -313,15 +370,6 @@ var game = {
         eventLabel: $('#code').val()
       });
 
-      analytics.push({
-        timeStamp: (new Date()).getTime(),
-        user: game.user,
-        levelName: level.name,
-        changed: game.changed,
-        input: $('#code').val(),
-        result: 'correct'
-      });
-            
       if ($.inArray(level.name, game.solved) === -1) {
         game.solved.push(level.name);
       }
@@ -334,15 +382,6 @@ var game = {
         eventCategory: level.name,
         eventAction: 'incorrect',
         eventLabel: $('#code').val()
-      });
-      
-      analytics.push({
-        timeStamp: (new Date()).getTime(),
-        user: game.user,
-        levelName: level.name,
-        changed: game.changed,
-        input: $('#code').val(),
-        result: 'incorrect'
       });
 
       $('#next').addClass('disabled');
@@ -387,7 +426,9 @@ var game = {
 
     $('.translate').each(function() {
       var label = $(this).attr('id');
-      var text = messages[label][game.language] || messages[label].en;
+      if (messages[label]) {
+        var text = messages[label][game.language] || messages[label].en;
+	  }
 
       $('#' + label).text(text);
     });
